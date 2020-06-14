@@ -1,0 +1,17 @@
+[package]
+name = "openvpn-ldap"
+version = "0.1.0"
+authors = ["Patrick Kerrigan <patrick@patrickkerrigan.uk>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+openvpn-plugin = "0.3.0"
+openldap = "1.2.2"
+libc = "*"
+secrecy = "0.6.0"
+
+[lib]
+crate-type = ["cdylib"]
+
