@@ -74,27 +74,34 @@ impl Authenticator {
     fn check_member_of_required_group<T>(&self, ldap: &T, user_dn: &str) -> AuthResult<()>
         where T : LdapService
     {
-        let group_search_filter = format!("(cn={})", self.ldap_config.get_group_cn());
-        let membership_search_filter = format!("(member={})", user_dn);
+        match (self.ldap_config.get_group_base_dn(), self.ldap_config.get_group_cn()) {
+            (Some(group_base_dn), Some(group_cn)) => {
+                let group_search_filter = format!("(cn={})", group_cn);
+                let membership_search_filter = format!("(member={})", user_dn);
 
-        let groups = ldap.search(
-            self.ldap_config.get_group_base_dn(),
-            LDAP_SCOPE_SUBTREE,
-            &group_search_filter
-        ).map_err(|_| "Error looking up group")?;
-        let group = groups.last().ok_or("Group not found")?;
-        let group_dn = group["dn"].first().ok_or("Group has no dn(!)").map(String::from)?;
+                let groups = ldap.search(
+                    group_base_dn,
+                    LDAP_SCOPE_SUBTREE,
+                    &group_search_filter
+                ).map_err(|_| "Error looking up group")?;
+                let group = groups.last().ok_or("Group not found")?;
+                let group_dn = group["dn"].first().ok_or("Group has no dn(!)").map(String::from)?;
 
-        let membership = ldap.search(
-            &group_dn,
-            LDAP_SCOPE_BASEOBJECT,
-            &membership_search_filter
-        ).map_err(|_| "Error checking group membership")?;
+                let membership = ldap.search(
+                    &group_dn,
+                    LDAP_SCOPE_BASEOBJECT,
+                    &membership_search_filter
+                ).map_err(|_| "Error checking group membership")?;
 
-        match membership.is_empty() {
-            true => Err("User not a member of required group"),
-            false => Ok(())
+                match membership.is_empty() {
+                    true => Err("User not a member of required group"),
+                    false => Ok(())
+                }
+            },
+
+            _ => Ok(())
         }
+
     }
 
     fn escape_search(input: &str) -> String {
@@ -206,8 +213,8 @@ mod tests {
             SecretString::from_str("invalid_service_pw").unwrap(),
             "users".into(),
             "uid".into(),
-            "groups".into(),
-            "valid_group".into()
+            Some("groups".into()),
+            Some("valid_group".into())
         );
 
         let authenticator = Authenticator::new(config);
@@ -223,8 +230,8 @@ mod tests {
             SecretString::from_str("valid_service_pw").unwrap(),
             "users".into(),
             "uid".into(),
-            "groups".into(),
-            "valid_group".into()
+            Some("groups".into()),
+            Some("valid_group".into())
         );
 
         let authenticator = Authenticator::new(config);
@@ -240,8 +247,8 @@ mod tests {
             SecretString::from_str("valid_service_pw").unwrap(),
             "users".into(),
             "uid".into(),
-            "groups".into(),
-            "valid_group".into()
+            Some("groups".into()),
+            Some("valid_group".into())
         );
 
         let authenticator = Authenticator::new(config);
@@ -257,8 +264,8 @@ mod tests {
             SecretString::from_str("valid_service_pw").unwrap(),
             "users".into(),
             "uid".into(),
-            "groups".into(),
-            "valid_group".into()
+            Some("groups".into()),
+            Some("valid_group".into())
         );
 
         let authenticator = Authenticator::new(config);
@@ -274,8 +281,8 @@ mod tests {
             SecretString::from_str("valid_service_pw").unwrap(),
             "users".into(),
             "uid".into(),
-            "groups".into(),
-            "invalid_group".into()
+            Some("groups".into()),
+            Some("invalid_group".into())
         );
 
         let authenticator = Authenticator::new(config);
@@ -291,8 +298,8 @@ mod tests {
             SecretString::from_str("valid_service_pw").unwrap(),
             "users".into(),
             "uid".into(),
-            "groups".into(),
-            "error_group".into()
+            Some("groups".into()),
+            Some("error_group".into())
         );
 
         let authenticator = Authenticator::new(config);
@@ -308,8 +315,8 @@ mod tests {
             SecretString::from_str("valid_service_pw").unwrap(),
             "users".into(),
             "uid".into(),
-            "groups".into(),
-            "empty_group".into()
+            Some("groups".into()),
+            Some("empty_group".into())
         );
 
         let authenticator = Authenticator::new(config);
@@ -325,8 +332,8 @@ mod tests {
             SecretString::from_str("valid_service_pw").unwrap(),
             "users".into(),
             "uid".into(),
-            "groups".into(),
-            "invalid_membership_group".into()
+            Some("groups".into()),
+            Some("invalid_membership_group".into())
         );
 
         let authenticator = Authenticator::new(config);
@@ -335,15 +342,49 @@ mod tests {
     }
 
     #[test]
-    fn test_auth_success_returns_true() {
+    fn test_auth_success_with_group_returns_true() {
         let config = LdapConfig::new(
             "".into(),
             "valid_service_dn".into(),
             SecretString::from_str("valid_service_pw").unwrap(),
             "users".into(),
             "uid".into(),
-            "groups".into(),
-            "valid_group".into()
+            Some("groups".into()),
+            Some("valid_group".into())
+        );
+
+        let authenticator = Authenticator::new(config);
+
+        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw").is_ok(), true);
+    }
+
+    #[test]
+    fn test_auth_success_without_group_config_returns_true() {
+        let config = LdapConfig::new(
+            "".into(),
+            "valid_service_dn".into(),
+            SecretString::from_str("valid_service_pw").unwrap(),
+            "users".into(),
+            "uid".into(),
+            Some("groups".into()),
+            None
+        );
+
+        let authenticator = Authenticator::new(config);
+
+        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw").is_ok(), true);
+    }
+
+    #[test]
+    fn test_auth_success_without_group_base_config_returns_true() {
+        let config = LdapConfig::new(
+            "".into(),
+            "valid_service_dn".into(),
+            SecretString::from_str("valid_service_pw").unwrap(),
+            "users".into(),
+            "uid".into(),
+            None,
+            Some("empty_group".into())
         );
 
         let authenticator = Authenticator::new(config);

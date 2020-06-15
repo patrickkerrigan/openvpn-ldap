@@ -11,8 +11,8 @@ pub struct LdapConfig {
     bind_password: SecretString,
     user_base_dn: String,
     username_property: String,
-    group_base_dn: String,
-    group_cn: String
+    group_base_dn: Option<String>,
+    group_cn: Option<String>
 }
 
 impl LdapConfig {
@@ -22,8 +22,8 @@ impl LdapConfig {
         bind_password: SecretString,
         user_base_dn: String,
         username_property: String,
-        group_base_dn: String,
-        group_cn: String
+        group_base_dn: Option<String>,
+        group_cn: Option<String>
     ) -> Self {
         LdapConfig {
             uri,
@@ -47,8 +47,8 @@ impl LdapConfig {
                 .expect("Secret string failed"),
             get_config_value(&config_map, "user-base-dn")?.into(),
             get_config_value(&config_map, "username-property")?.into(),
-            get_config_value(&config_map, "group-base-dn")?.into(),
-            get_config_value(&config_map, "group-cn")?.into()
+            get_config_value(&config_map, "group-base-dn").ok().map(String::from),
+            get_config_value(&config_map, "group-cn").ok().map(String::from)
         ))
     }
 
@@ -72,12 +72,12 @@ impl LdapConfig {
         &self.username_property
     }
 
-    pub fn get_group_base_dn(&self) -> &str {
-        &self.group_base_dn
+    pub fn get_group_base_dn(&self) -> Option<&str> {
+        self.group_base_dn.as_deref()
     }
 
-    pub fn get_group_cn(&self) -> &str {
-        &self.group_cn
+    pub fn get_group_cn(&self) -> Option<&str> {
+        self.group_cn.as_deref()
     }
 }
 
