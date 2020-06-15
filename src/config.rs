@@ -84,7 +84,8 @@ impl LdapConfig {
 fn parse_config_file(raw_file: &str) -> HashMap<String, String> {
     let config_lines = raw_file.trim().lines();
     config_lines.filter_map(|line| {
-            let mut parts = line.trim().splitn(2, ' ');
+            let mut comment_parts = line.trim().splitn(2, '#');
+            let mut parts = comment_parts.next()?.trim().splitn(2, ' ');
             Some((parts.next()?.into(), parts.next()?.into()))
         })
         .collect()
@@ -104,7 +105,8 @@ mod tests {
         let raw_data = r###"
         test-option-1 test-value-1
 
-        test-option-2 test-value-2
+        # test comment
+        test-option-2 test-value-2 # another comment
         test-option-3 test-value-3 with spaces
         "###;
 
