@@ -38,12 +38,16 @@ fn async_auth(
     mut control_file: File,
     authenticator: Authenticator
 ) {
-    if authenticator.authenticate::<NetworkLdapService>(&username, password.expose_secret()) {
-        println!("Authentication succeeded for {}", &username);
-        let _ = control_file.write_all(b"1");
-    } else {
-        println!("Authentication failed for {}", &username);
-        let _ = control_file.write_all(b"0");
+    match authenticator.authenticate::<NetworkLdapService>(&username, password.expose_secret()) {
+        Ok(_) => {
+            println!("Authentication succeeded for {}", &username);
+            let _ = control_file.write_all(b"1");
+        },
+
+        Err(e) => {
+            println!("Authentication failed for {} - {}", &username, e);
+            let _ = control_file.write_all(b"0");
+        }
     }
 }
 

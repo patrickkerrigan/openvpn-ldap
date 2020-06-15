@@ -2,6 +2,8 @@ use openldap::codes::scopes::*;
 use crate::config::LdapConfig;
 use crate::ldap::LdapService;
 
+pub type AuthResult<T> = Result<T, &'static str>;
+
 #[derive(Clone)]
 pub struct Authenticator {
     ldap_config: LdapConfig
@@ -12,7 +14,16 @@ impl Authenticator {
         Authenticator { ldap_config }
     }
 
-    pub fn authenticate<T>(&self, username: &str, password: &str) -> bool
+    pub fn authenticate<T>(&self, username: &str, password: &str) -> AuthResult<()>
+        where T : LdapService
+    {
+        let ldap = self.bind_as_service::<T>()?;
+        let user_dn = self.resolve_user_dn(&ldap, username)?;
+        let _ = self.verify_password::<T>(&user_dn, password)?;
+        self.check_member_of_required_group(&ldap, &user_dn)
+    }
+
+    fn bind_as_service<T>(&self) -> AuthResult<T>
         where T : LdapService
     {
         let ldap = T::new(self.ldap_config.get_uri());
@@ -23,83 +34,67 @@ impl Authenticator {
         );
 
         if !bind {
-            println!("Unable to bind as service");
-            return false;
+            return Err("Unable to bind as service");
         }
 
+        Ok(ldap)
+    }
+
+    fn resolve_user_dn<T>(&self, ldap: &T, username: &str) -> AuthResult<String>
+        where T : LdapService
+    {
         let user_search_filter = format!(
             "({}={})",
             self.ldap_config.get_username_property(),
             Authenticator::escape_search(username)
         );
 
-        let user_list = ldap.search(
+        let users = ldap.search(
             self.ldap_config.get_user_base_dn(),
             LDAP_SCOPE_SUBTREE,
             &user_search_filter
-        );
+        ).map_err(|_| "Error looking up user")?;
+        let user = users.last().ok_or("User not found")?;
+        user["dn"].first().ok_or("User has no dn(!)").map(String::from)
+    }
 
-        if user_list.is_err() {
-            println!("User not found");
-            return false;
-        }
-
-        let user_list = user_list.unwrap();
-        let user = user_list.last();
-
-
-        if user.is_none() {
-            println!("User not found");
-            return false;
-        }
-
-        let user = user.unwrap();
-
-
+    fn verify_password<T>(&self, user_dn: &str, password: &str) -> AuthResult<()>
+        where T : LdapService
+    {
         let auth_ldap = T::new(self.ldap_config.get_uri());
-        let auth_bind = auth_ldap.bind(user["dn"].first().unwrap(), password);
+        let auth_bind = auth_ldap.bind(user_dn, password);
 
         if !auth_bind {
-            println!("Invalid password");
-            return false;
+            return Err("Invalid password");
         }
 
-        let group_search_filter = format!("(cn={})", self.ldap_config.get_group_cn());
+        Ok(())
+    }
 
-        let group_list = ldap.search(
+    fn check_member_of_required_group<T>(&self, ldap: &T, user_dn: &str) -> AuthResult<()>
+        where T : LdapService
+    {
+        let group_search_filter = format!("(cn={})", self.ldap_config.get_group_cn());
+        let membership_search_filter = format!("(member={})", user_dn);
+
+        let groups = ldap.search(
             self.ldap_config.get_group_base_dn(),
             LDAP_SCOPE_SUBTREE,
             &group_search_filter
-        );
+        ).map_err(|_| "Error looking up group")?;
+        let group = groups.last().ok_or("Group not found")?;
+        let group_dn = group["dn"].first().ok_or("Group has no dn(!)").map(String::from)?;
 
-        if group_list.is_err() {
-            println!("Group not found");
-            return false;
-        }
-
-        let group_list = group_list.unwrap();
-        let group = group_list.last();
-
-
-        if group.is_none() {
-            println!("Group not found");
-            return false;
-        }
-
-        let group = group.unwrap();
-
-        let member_list = ldap.search(
-            group["dn"].first().unwrap(),
+        let membership = ldap.search(
+            &group_dn,
             LDAP_SCOPE_BASEOBJECT,
-            &format!("(member={})", user["dn"].first().unwrap())
-        );
+            &membership_search_filter
+        ).map_err(|_| "Error checking group membership")?;
 
-        if member_list.is_err() || member_list.unwrap().is_empty() {
-            println!("User not a member of required group");
-            return false;
+        match membership.is_empty() {
+            true => Err("User not a member of required group"),
+            false => Ok(())
         }
-
-        true
     }
 
     fn escape_search(input: &str) -> String {
@@ -144,6 +139,15 @@ mod tests {
                     Ok(result)
                 },
 
+                ("users", 0x0002, "(uid=invalid_username)") => {
+                    let result: LDAPResponse = vec![];
+                    Ok(result)
+                },
+
+                ("users", 0x0002, "(uid=error_username)") => {
+                    Err(LDAPError::NativeError("".into()))
+                },
+
                 ("groups", 0x0002, "(cn=valid_group)") => {
                     let mut group: HashMap<String, Vec<String>> = HashMap::new();
                     group.insert("dn".into(), vec!["valid_group_dn".into()]);
@@ -151,9 +155,25 @@ mod tests {
                     Ok(result)
                 },
 
+                ("groups", 0x0002, "(cn=invalid_group)") => {
+                    let result: LDAPResponse = vec![];
+                    Ok(result)
+                },
+
+                ("groups", 0x0002, "(cn=error_group)") => {
+                    Err(LDAPError::NativeError("".into()))
+                },
+
                 ("groups", 0x0002, "(cn=empty_group)") => {
                     let mut group: HashMap<String, Vec<String>> = HashMap::new();
                     group.insert("dn".into(), vec!["empty_group_dn".into()]);
+                    let result: LDAPResponse = vec![group];
+                    Ok(result)
+                },
+
+                ("groups", 0x0002, "(cn=invalid_membership_group)") => {
+                    let mut group: HashMap<String, Vec<String>> = HashMap::new();
+                    group.insert("dn".into(), vec!["invalid_membership_group_dn".into()]);
                     let result: LDAPResponse = vec![group];
                     Ok(result)
                 },
@@ -167,6 +187,10 @@ mod tests {
 
                 ("empty_group_dn", 0x0000, "(member=valid_user_dn)") => {
                     Ok(vec![])
+                },
+
+                ("invalid_membership_group_dn", 0x0000, "(member=valid_user_dn)") => {
+                    Err(LDAPError::NativeError("".into()))
                 },
 
                 _ => Err(LDAPError::NativeError("".into()))
@@ -188,7 +212,7 @@ mod tests {
 
         let authenticator = Authenticator::new(config);
 
-        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw"), false);
+        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw").is_ok(), false);
     }
 
     #[test]
@@ -205,7 +229,24 @@ mod tests {
 
         let authenticator = Authenticator::new(config);
 
-        assert_eq!(authenticator.authenticate::<MockLdapService>("invalid_username", "valid_user_pw"), false);
+        assert_eq!(authenticator.authenticate::<MockLdapService>("invalid_username", "valid_user_pw").is_ok(), false);
+    }
+
+    #[test]
+    fn test_user_lookup_error_returns_false() {
+        let config = LdapConfig::new(
+            "".into(),
+            "valid_service_dn".into(),
+            SecretString::from_str("valid_service_pw").unwrap(),
+            "users".into(),
+            "uid".into(),
+            "groups".into(),
+            "valid_group".into()
+        );
+
+        let authenticator = Authenticator::new(config);
+
+        assert_eq!(authenticator.authenticate::<MockLdapService>("error_username", "valid_user_pw").is_ok(), false);
     }
 
     #[test]
@@ -222,7 +263,7 @@ mod tests {
 
         let authenticator = Authenticator::new(config);
 
-        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "invalid_user_pw"), false);
+        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "invalid_user_pw").is_ok(), false);
     }
 
     #[test]
@@ -239,7 +280,24 @@ mod tests {
 
         let authenticator = Authenticator::new(config);
 
-        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw"), false);
+        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw").is_ok(), false);
+    }
+
+    #[test]
+    fn test_group_lookup_error_returns_false() {
+        let config = LdapConfig::new(
+            "".into(),
+            "valid_service_dn".into(),
+            SecretString::from_str("valid_service_pw").unwrap(),
+            "users".into(),
+            "uid".into(),
+            "groups".into(),
+            "error_group".into()
+        );
+
+        let authenticator = Authenticator::new(config);
+
+        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw").is_ok(), false);
     }
 
     #[test]
@@ -256,7 +314,24 @@ mod tests {
 
         let authenticator = Authenticator::new(config);
 
-        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw"), false);
+        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw").is_ok(), false);
+    }
+
+    #[test]
+    fn test_membership_lookup_error_returns_false() {
+        let config = LdapConfig::new(
+            "".into(),
+            "valid_service_dn".into(),
+            SecretString::from_str("valid_service_pw").unwrap(),
+            "users".into(),
+            "uid".into(),
+            "groups".into(),
+            "invalid_membership_group".into()
+        );
+
+        let authenticator = Authenticator::new(config);
+
+        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw").is_ok(), false);
     }
 
     #[test]
@@ -273,7 +348,7 @@ mod tests {
 
         let authenticator = Authenticator::new(config);
 
-        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw"), true);
+        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "valid_user_pw").is_ok(), true);
     }
 
     #[test]
