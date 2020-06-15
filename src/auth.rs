@@ -61,6 +61,10 @@ impl Authenticator {
     fn verify_password<T>(&self, user_dn: &str, password: &str) -> AuthResult<()>
         where T : LdapService
     {
+        if password.is_empty() {
+            return Err("Invalid password");
+        }
+
         let auth_ldap = T::new(self.ldap_config.get_uri());
         let auth_bind = auth_ldap.bind(user_dn, password);
 
@@ -133,6 +137,7 @@ mod tests {
             match (dn, password) {
                 ("valid_service_dn", "valid_service_pw") => true,
                 ("valid_user_dn", "valid_user_pw") => true,
+                ("valid_user_dn", "") => true,
                 _ => false
             }
         }
@@ -271,6 +276,23 @@ mod tests {
         let authenticator = Authenticator::new(config);
 
         assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "invalid_user_pw").is_ok(), false);
+    }
+
+    #[test]
+    fn test_blank_password_returns_false() {
+        let config = LdapConfig::new(
+            "".into(),
+            "valid_service_dn".into(),
+            SecretString::from_str("valid_service_pw").unwrap(),
+            "users".into(),
+            "uid".into(),
+            Some("groups".into()),
+            Some("valid_group".into())
+        );
+
+        let authenticator = Authenticator::new(config);
+
+        assert_eq!(authenticator.authenticate::<MockLdapService>("valid_username", "").is_ok(), false);
     }
 
     #[test]
