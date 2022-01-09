@@ -8,7 +8,7 @@ edition = "2021"
 openvpn-plugin = "0.4.1"
 openldap = "1.2.2"
 libc = "*"
-secrecy = "0.6.0"
+secrecy = "0.8.0"
 
 [lib]
 crate-type = ["cdylib"]
