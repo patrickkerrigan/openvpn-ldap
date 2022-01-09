@@ -2,7 +2,7 @@
 name = "openvpn-ldap"
 version = "0.1.0"
 authors = ["Patrick Kerrigan"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 openvpn-plugin = "0.3.0"
