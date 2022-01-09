@@ -10,7 +10,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Install OpenLDAP
+        run: sudo apt install -y libldap2-dev
+
       - uses: actions/checkout@v2
+
       - name: Cache Cargo dependencies
         uses: actions/cache@v2
         with:
@@ -18,5 +22,6 @@ jobs:
           key: ${{ runner.OS }}-build-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.OS }}-build-
+
       - name: Run tests
         run: cargo test --release
