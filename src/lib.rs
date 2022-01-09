@@ -7,7 +7,7 @@ use std::io::{Error, ErrorKind, Write};
 use std::thread;
 use std::fs::File;
 use std::str::FromStr;
-use openvpn_plugin::types::{EventResult, OpenVpnPluginEvent};
+use openvpn_plugin::{EventResult, EventType};
 use secrecy::{SecretString, ExposeSecret};
 use crate::config::LdapConfig;
 use crate::ldap::NetworkLdapService;
@@ -54,12 +54,12 @@ fn async_auth(
 fn openvpn_open(
     args: Vec<CString>,
     _env: HashMap<CString, CString>,
-) -> Result<(Vec<OpenVpnPluginEvent>, Authenticator), Error> {
+) -> Result<(Vec<EventType>, Authenticator), Error> {
     println!("Starting LDAP auth plugin");
 
     let config = LdapConfig::from_file(get_argument(&args, 1)?)?;
     let authenticator = Authenticator::new(config);
-    let events = vec![OpenVpnPluginEvent::AuthUserPassVerify];
+    let events = vec![EventType::AuthUserPassVerify];
 
     Ok((events, authenticator))
 }
@@ -69,14 +69,14 @@ fn openvpn_close(_authenticator: Authenticator) {
 }
 
 fn openvpn_event(
-    event: OpenVpnPluginEvent,
+    event: EventType,
     _args: Vec<CString>,
     env: HashMap<CString, CString>,
     authenticator: &mut Authenticator,
 ) -> Result<EventResult, Error> {
 
     match event {
-        OpenVpnPluginEvent::AuthUserPassVerify => {
+        EventType::AuthUserPassVerify => {
             let username = String::from(get_env_field(&env, "username")?);
             let password = SecretString::from_str(get_env_field(&env, "password")?)
                 .expect("Secret string creation failed");

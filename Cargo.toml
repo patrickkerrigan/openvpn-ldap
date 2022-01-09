@@ -5,7 +5,7 @@ authors = ["Patrick Kerrigan"]
 edition = "2021"
 
 [dependencies]
-openvpn-plugin = "0.3.0"
+openvpn-plugin = "0.4.1"
 openldap = "1.2.2"
 libc = "*"
 secrecy = "0.6.0"
