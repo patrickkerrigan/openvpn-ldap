@@ -9,7 +9,7 @@ jobs:
 
     steps:
       - name: Install OpenLDAP
-        run: sudo apt install -y libldap2-dev
+        run: sudo apt update && sudo apt install -y libldap2-dev
 
       - uses: actions/checkout@v2
 
